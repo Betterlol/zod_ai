@@ -1,0 +1,5 @@
+// import {
+//   "username/zod_ai" @lib,
+// }
+
+pkgtype(kind: "executable")
