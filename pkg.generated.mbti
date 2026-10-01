@@ -1,0 +1,136 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Betterlol/zod_ai"
+
+import {
+  "Betterlol/moon_zod/core",
+}
+
+// Values
+pub fn agent(Array[ToolContract], @core.Schema, repair_policy? : RepairPolicy) -> Agent
+
+pub fn final_output(Json) -> ModelResponse
+
+pub fn mock_model(Array[ModelResponse]) -> (Array[Message], Array[ToolDefinition]) -> Result[ModelResponse, String]
+
+pub fn reject(String) -> ExecutionPolicy
+
+pub fn repair_policy(Int, Int, Int, retry_tool_failures? : Bool) -> RepairPolicy
+
+pub fn require_approval() -> ExecutionPolicy
+
+pub fn tool(String, String, @core.Schema, @core.Schema, (Json) -> Result[Json, String]) -> ToolContract
+
+pub fn tool_call(String, String, Json) -> ToolCall
+
+pub fn tool_response(ToolCall) -> ModelResponse
+
+pub fn tool_with_policy(String, String, @core.Schema, @core.Schema, ExecutionPolicy, (Json) -> Result[Json, String]) -> ToolContract
+
+// Errors
+
+// Types and methods
+pub struct Agent {
+  tools : Array[ToolContract]
+  output_schema : @core.Schema
+  repair_policy : RepairPolicy
+}
+pub fn Agent::run(Self, (Array[Message], Array[ToolDefinition]) -> Result[ModelResponse, String], String) -> Result[AgentRunResult, AgentFailure]
+pub fn Agent::tool_definitions(Self) -> Array[ToolDefinition]
+
+pub enum AgentEvent {
+  ModelRequested(Int)
+  ToolCallReceived(String, String)
+  ToolInputRejected(String, Array[String])
+  ToolStarted(String, String)
+  ToolCompleted(String, String)
+  ApprovalRequested(String, String)
+  FinalOutputRejected(Array[String])
+  RepairRequested(String)
+  Completed
+}
+
+pub enum AgentFailure {
+  ModelFailed(String)
+  ToolOutputInvalid(String, Array[@core.ValidationError])
+  ToolExecutionFailed(String, String)
+  ToolRejected(String, String)
+  ApprovalRequired(ApprovalRequest)
+  RetryLimitExceeded(String)
+  TurnLimitExceeded(Int)
+}
+
+pub struct AgentRunResult {
+  output : Json
+  messages : Array[Message]
+  events : Array[AgentEvent]
+}
+
+pub struct ApprovalRequest {
+  call : ToolCall
+  validated_arguments : Json
+}
+
+pub enum ExecutionPolicy {
+  Allow
+  Reject(String)
+  RequireApproval
+}
+
+pub enum Message {
+  UserPrompt(String)
+  ToolCallRequested(ToolCall)
+  ToolReturned(ToolResult)
+  RetryRequested(RetryPrompt)
+}
+
+pub enum ModelResponse {
+  ToolCall(ToolCall)
+  FinalOutput(Json)
+}
+
+pub struct RepairPolicy {
+  max_turns : Int
+  max_tool_retries : Int
+  max_output_retries : Int
+  retry_tool_failures : Bool
+}
+pub fn RepairPolicy::default() -> Self
+
+pub struct RetryPrompt {
+  call_id : String
+  tool_name : String
+  reason : String
+}
+
+pub struct ToolCall {
+  id : String
+  name : String
+  arguments : Json
+}
+
+pub struct ToolContract {
+  name : String
+  description : String
+  input_schema : @core.Schema
+  output_schema : @core.Schema
+  execution_policy : ExecutionPolicy
+  execute : (Json) -> Result[Json, String]
+}
+pub fn ToolContract::definition(Self) -> ToolDefinition
+
+pub struct ToolDefinition {
+  name : String
+  description : String
+  input_json_schema : Json
+}
+
+pub struct ToolResult {
+  call_id : String
+  tool_name : String
+  value : Json
+}
+
+// Type aliases
+pub type Model = (Array[Message], Array[ToolDefinition]) -> Result[ModelResponse, String]
+
+// Traits

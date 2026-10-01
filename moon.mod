@@ -9,7 +9,7 @@
 //   "moonbitlang/x@0.4.6",
 // }
 
-name = "username/zod_ai"
+name = "Betterlol/zod_ai"
 
 version = "0.1.0"
 
@@ -19,7 +19,7 @@ repository = ""
 
 license = "Apache-2.0"
 
-keywords = []
+keywords = [ ]
 
 preferred_target = "wasm"
 
