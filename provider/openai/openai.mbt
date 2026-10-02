@@ -3,6 +3,13 @@
 /// submits `request()` and passes its decoded JSON response to `response()`.
 
 ///|
+/// A synchronous, injectable JSON transport.
+///
+/// A WASI HTTP adapter should serialize the request JSON, submit it to
+/// `/v1/chat/completions`, decode the response body, and return that JSON.
+pub type Transport = (Json) -> Result[Json, String]
+
+///|
 fn tools(definitions : Array[@zod_ai.ToolDefinition]) -> Array[Json] {
   definitions.map(definition => {
     Json::object({
@@ -66,6 +73,20 @@ pub fn request(
     "messages": Json::array(messages(history)),
     "tools": Json::array(tools(definitions)),
   })
+}
+
+///|
+/// Adapt an OpenAI-compatible transport into the synchronous `zod_ai.Model`
+/// interface. This function owns protocol translation only; it never reads API
+/// keys or performs I/O itself.
+pub fn model(model_name : String, transport : Transport) -> @zod_ai.Model {
+  fn(history, definitions) {
+    let body = request(model_name, history, definitions)
+    match transport(body) {
+      Ok(reply) => response(reply)
+      Err(reason) => Err("OpenAI transport failed: " + reason)
+    }
+  }
 }
 
 ///|

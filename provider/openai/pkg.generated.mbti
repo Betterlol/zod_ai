@@ -6,6 +6,8 @@ import {
 }
 
 // Values
+pub fn model(String, (Json) -> Result[Json, String]) -> (Array[@zod_ai.Message], Array[@zod_ai.ToolDefinition]) -> Result[@zod_ai.ModelResponse, String]
+
 pub fn request(String, Array[@zod_ai.Message], Array[@zod_ai.ToolDefinition]) -> Json
 
 pub fn response(Json) -> Result[@zod_ai.ModelResponse, String]
@@ -15,5 +17,6 @@ pub fn response(Json) -> Result[@zod_ai.ModelResponse, String]
 // Types and methods
 
 // Type aliases
+pub type Transport = (Json) -> Result[Json, String]
 
 // Traits
