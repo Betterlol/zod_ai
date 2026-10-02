@@ -1,0 +1,6 @@
+import {
+  "Betterlol/moon_zod",
+  "Betterlol/zod_ai",
+}
+
+pkgtype(kind: "executable")
