@@ -26,5 +26,5 @@ preferred_target = "wasm"
 description = ""
 
 import {
-  "Betterlol/moon_zod@0.8.2",
+  "Betterlol/moon_zod@0.9.0",
 }

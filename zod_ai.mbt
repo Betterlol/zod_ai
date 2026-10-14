@@ -144,9 +144,9 @@ pub fn tool_with_policy(
 
 ///|
 pub struct RepairPolicy {
-  max_turns : Int
-  max_tool_retries : Int
-  max_output_retries : Int
+  max_turns : Int32
+  max_tool_retries : Int32
+  max_output_retries : Int32
   retry_tool_failures : Bool
 }
 
@@ -162,10 +162,10 @@ pub fn RepairPolicy::default() -> RepairPolicy {
 
 ///|
 pub fn repair_policy(
-  max_turns : Int,
-  max_tool_retries : Int,
-  max_output_retries : Int,
-  retry_tool_failures? : Bool = false,
+  max_turns : Int32,
+  max_tool_retries : Int32,
+  max_output_retries : Int32,
+  retry_tool_failures~ : Bool = false,
 ) -> RepairPolicy {
   { max_turns, max_tool_retries, max_output_retries, retry_tool_failures, }
 }
@@ -181,14 +181,14 @@ pub struct Agent {
 pub fn agent(
   tools : Array[ToolContract],
   output_schema : @moon_zod.Schema,
-  repair_policy? : RepairPolicy = RepairPolicy::default(),
+  repair_policy~ : RepairPolicy = RepairPolicy::default(),
 ) -> Agent {
   { tools, output_schema, repair_policy, }
 }
 
 ///|
 pub enum AgentEvent {
-  ModelRequested(Int)
+  ModelRequested(Int32)
   ToolCallReceived(String, String)
   ToolInputRejected(String, Array[String])
   ToolStarted(String, String)
@@ -213,7 +213,7 @@ pub enum AgentFailure {
   ToolRejected(String, String)
   ApprovalRequired(ApprovalRequest)
   RetryLimitExceeded(String)
-  TurnLimitExceeded(Int)
+  TurnLimitExceeded(Int32)
 }
 
 ///|
