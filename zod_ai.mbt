@@ -24,6 +24,31 @@ pub struct ToolResult {
 }
 
 ///|
+/// Per-run data supplied to context-aware tools.
+///
+/// Dependencies deliberately use `Json` at the runtime boundary. This keeps a
+/// `ToolContract` reusable across MoonBit targets while callers may still
+/// validate their dependency object with moon_zod before supplying it.
+pub struct RunContext {
+  deps : Json
+  prompt : String
+  messages : Array[Message]
+  tool_call_id : String
+  turn : Int32
+}
+
+///|
+pub fn run_context(
+  deps : Json,
+  prompt : String,
+  messages : Array[Message],
+  tool_call_id : String,
+  turn : Int32,
+) -> RunContext {
+  { deps, prompt, messages, tool_call_id, turn, }
+}
+
+///|
 pub struct RetryPrompt {
   call_id : String
   tool_name : String
@@ -92,7 +117,7 @@ pub struct ToolContract {
   input_schema : @moon_zod.Schema
   output_schema : @moon_zod.Schema
   execution_policy : ExecutionPolicy
-  execute : (Json) -> Result[Json, String]
+  execute : (RunContext, Json) -> Result[Json, String]
 }
 
 ///|
@@ -120,13 +145,13 @@ pub fn tool(
   output_schema : @moon_zod.Schema,
   execute : (Json) -> Result[Json, String],
 ) -> ToolContract {
-  tool_with_policy(
+  tool_with_context_and_policy(
     name,
     description,
     input_schema,
     output_schema,
     Allow,
-    execute,
+    fn(_context, input) { execute(input) },
   )
 }
 
@@ -139,7 +164,79 @@ pub fn tool_with_policy(
   execution_policy : ExecutionPolicy,
   execute : (Json) -> Result[Json, String],
 ) -> ToolContract {
+  tool_with_context_and_policy(
+    name,
+    description,
+    input_schema,
+    output_schema,
+    execution_policy,
+    fn(_context, input) { execute(input) },
+  )
+}
+
+///|
+/// Create a tool that can access run-scoped dependencies and transcript data.
+pub fn tool_with_context(
+  name : String,
+  description : String,
+  input_schema : @moon_zod.Schema,
+  output_schema : @moon_zod.Schema,
+  execute : (RunContext, Json) -> Result[Json, String],
+) -> ToolContract {
+  tool_with_context_and_policy(
+    name,
+    description,
+    input_schema,
+    output_schema,
+    Allow,
+    execute,
+  )
+}
+
+///|
+pub fn tool_with_context_and_policy(
+  name : String,
+  description : String,
+  input_schema : @moon_zod.Schema,
+  output_schema : @moon_zod.Schema,
+  execution_policy : ExecutionPolicy,
+  execute : (RunContext, Json) -> Result[Json, String],
+) -> ToolContract {
   { name, description, input_schema, output_schema, execution_policy, execute, }
+}
+
+///|
+/// A reusable, composable group of tools.
+pub struct ToolSet {
+  tools : Array[ToolContract]
+}
+
+///|
+pub fn tool_set(tools : Array[ToolContract]) -> ToolSet {
+  { tools, }
+}
+
+///|
+pub fn ToolSet::definitions(self : ToolSet) -> Array[ToolDefinition] {
+  self.tools.map(item => item.definition())
+}
+
+///|
+/// Merge tool sets while rejecting duplicate names before a model can see an
+/// ambiguous contract.
+pub fn combine_tool_sets(tool_sets : Array[ToolSet]) -> Result[ToolSet, String] {
+  let merged : Array[ToolContract] = []
+  for tool_set in tool_sets {
+    for tool in tool_set.tools {
+      for existing in merged {
+        if existing.name == tool.name {
+          return Err("Duplicate tool name: " + tool.name)
+        }
+      }
+      merged.push(tool)
+    }
+  }
+  Ok({ tools: merged, })
 }
 
 ///|
@@ -187,6 +284,18 @@ pub fn agent(
 }
 
 ///|
+pub fn agent_with_tool_sets(
+  tool_sets : Array[ToolSet],
+  output_schema : @moon_zod.Schema,
+  repair_policy~ : RepairPolicy = RepairPolicy::default(),
+) -> Result[Agent, String] {
+  match combine_tool_sets(tool_sets) {
+    Ok(merged) => Ok(agent(merged.tools, output_schema, repair_policy~))
+    Err(reason) => Err(reason)
+  }
+}
+
+///|
 pub enum AgentEvent {
   ModelRequested(Int32)
   ToolCallReceived(String, String)
@@ -203,6 +312,14 @@ pub enum AgentEvent {
 pub struct ApprovalRequest {
   call : ToolCall
   validated_arguments : Json
+  prompt : String
+  deps : Json
+  messages : Array[Message]
+  events : Array[AgentEvent]
+  responses : Array[ModelResponse]
+  turns : Int32
+  tool_retries : Int32
+  output_retries : Int32
 }
 
 ///|
@@ -221,6 +338,67 @@ pub struct AgentRunResult {
   output : Json
   messages : Array[Message]
   events : Array[AgentEvent]
+  responses : Array[ModelResponse]
+}
+
+///|
+/// Recreate a deterministic model from a completed run's recorded model
+/// responses. It is useful for regression and contract tests without a live
+/// provider.
+pub fn replay_model(result : AgentRunResult) -> Model {
+  mock_model(result.responses)
+}
+
+///|
+/// A transport-independent MCP tool description derived from the same schema
+/// contract offered to language models.
+pub struct McpToolDefinition {
+  name : String
+  description : String
+  input_schema : Json
+}
+
+///|
+/// Serialize a tool description using the MCP `tools/list` field names.
+pub fn McpToolDefinition::to_json(self : McpToolDefinition) -> Json {
+  Json::object({
+    "name": Json::string(self.name),
+    "description": Json::string(self.description),
+    "inputSchema": self.input_schema,
+  })
+}
+
+///|
+pub fn ToolContract::mcp_definition(self : ToolContract) -> McpToolDefinition {
+  {
+    name: self.name,
+    description: self.description,
+    input_schema: @moon_zod.to_json_schema(self.input_schema),
+  }
+}
+
+///|
+pub fn Agent::mcp_tool_definitions(self : Agent) -> Array[McpToolDefinition] {
+  self.tools.map(item => item.mcp_definition())
+}
+
+///|
+/// Adapt an MCP client's `tools/call` operation into a local ToolContract.
+/// The caller owns connection management and transport; the agent still
+/// validates both arguments and returned values through moon_zod.
+pub fn mcp_tool(
+  name : String,
+  description : String,
+  input_schema : @moon_zod.Schema,
+  output_schema : @moon_zod.Schema,
+  call : (String, Json) -> Result[Json, String],
+) -> ToolContract {
+  tool_with_context(name, description, input_schema, output_schema, fn(
+    _context,
+    arguments,
+  ) {
+    call(name, arguments)
+  })
 }
 
 ///|
@@ -322,12 +500,125 @@ pub fn Agent::run(
   model : Model,
   prompt : String,
 ) -> Result[AgentRunResult, AgentFailure] {
-  let messages : Array[Message] = [UserPrompt(prompt)]
-  let events : Array[AgentEvent] = []
+  self.run_with_deps(model, prompt, Json::null())
+}
+
+///|
+/// Run an agent with JSON dependencies exposed to context-aware tools.
+pub fn Agent::run_with_deps(
+  self : Agent,
+  model : Model,
+  prompt : String,
+  deps : Json,
+) -> Result[AgentRunResult, AgentFailure] {
+  self.continue_run(model, prompt, deps, [UserPrompt(prompt)], [], [], 0, 0, 0)
+}
+
+///|
+/// Continue a run that paused at an explicit approval boundary.
+///
+/// Passing `approved=false` records no side effect and returns the same policy
+/// failure shape as a rejected tool.
+pub fn Agent::resume_after_approval(
+  self : Agent,
+  model : Model,
+  request : ApprovalRequest,
+  approved : Bool,
+) -> Result[AgentRunResult, AgentFailure] {
+  let contract = match self.find_tool(request.call.name) {
+    Some(contract) => contract
+    None =>
+      return Err(ToolRejected(request.call.name, "Tool is no longer available"))
+  }
+  if !approved {
+    return Err(ToolRejected(contract.name, "Approval was denied"))
+  }
+  match contract.execution_policy {
+    RequireApproval => ()
+    Reject(reason) => return Err(ToolRejected(contract.name, reason))
+    Allow =>
+      return Err(ToolRejected(contract.name, "Tool does not require approval"))
+  }
+  let context = run_context(
+    request.deps,
+    request.prompt,
+    request.messages,
+    request.call.id,
+    request.turns,
+  )
+  request.events.push(ToolStarted(contract.name, request.call.id))
+  let raw_output = match
+    (contract.execute)(context, request.validated_arguments) {
+    Ok(output) => output
+    Err(reason) => {
+      if !self.repair_policy.retry_tool_failures {
+        return Err(ToolExecutionFailed(contract.name, reason))
+      }
+      let next_tool_retries = request.tool_retries + 1
+      if next_tool_retries > self.repair_policy.max_tool_retries {
+        return Err(RetryLimitExceeded("tool"))
+      }
+      add_tool_retry(
+        request.messages,
+        request.events,
+        request.call,
+        execution_retry_reason(contract.name, reason),
+      )
+      return self.continue_run(
+        model,
+        request.prompt,
+        request.deps,
+        request.messages,
+        request.events,
+        request.responses,
+        request.turns,
+        next_tool_retries,
+        request.output_retries,
+      )
+    }
+  }
+  let clean_output = match contract.output_schema.parse(raw_output) {
+    Ok(output) => output
+    Err(errors) => return Err(ToolOutputInvalid(contract.name, errors))
+  }
+  request.messages.push(
+    ToolReturned({
+      call_id: request.call.id,
+      tool_name: contract.name,
+      value: clean_output,
+    }),
+  )
+  request.events.push(ToolCompleted(contract.name, request.call.id))
+  self.continue_run(
+    model,
+    request.prompt,
+    request.deps,
+    request.messages,
+    request.events,
+    request.responses,
+    request.turns,
+    request.tool_retries,
+    request.output_retries,
+  )
+}
+
+///|
+fn Agent::continue_run(
+  self : Agent,
+  model : Model,
+  prompt : String,
+  deps : Json,
+  messages : Array[Message],
+  events : Array[AgentEvent],
+  responses : Array[ModelResponse],
+  initial_turns : Int32,
+  initial_tool_retries : Int32,
+  initial_output_retries : Int32,
+) -> Result[AgentRunResult, AgentFailure] {
   let definitions = self.tool_definitions()
-  let mut turns = 0
-  let mut tool_retries = 0
-  let mut output_retries = 0
+  let mut turns = initial_turns
+  let mut tool_retries = initial_tool_retries
+  let mut output_retries = initial_output_retries
 
   while turns < self.repair_policy.max_turns {
     turns = turns + 1
@@ -336,6 +627,7 @@ pub fn Agent::run(
       Ok(response) => response
       Err(reason) => return Err(ModelFailed(reason))
     }
+    responses.push(response)
     match response {
       ToolCall(call) => {
         messages.push(ToolCallRequested(call))
@@ -380,12 +672,27 @@ pub fn Agent::run(
                       ApprovalRequired({
                         call,
                         validated_arguments: clean_input,
+                        prompt,
+                        deps,
+                        messages,
+                        events,
+                        responses,
+                        turns,
+                        tool_retries,
+                        output_retries,
                       }),
                     )
                   }
                   Allow => {
                     events.push(ToolStarted(call.name, call.id))
-                    match (contract.execute)(clean_input) {
+                    let context = run_context(
+                      deps,
+                      prompt,
+                      messages,
+                      call.id,
+                      turns,
+                    )
+                    match (contract.execute)(context, clean_input) {
                       Err(reason) => {
                         if !self.repair_policy.retry_tool_failures {
                           return Err(ToolExecutionFailed(contract.name, reason))
@@ -426,7 +733,7 @@ pub fn Agent::run(
         match self.output_schema.parse(raw_output) {
           Ok(output) => {
             events.push(Completed)
-            return Ok({ output, messages, events, })
+            return Ok({ output, messages, events, responses, })
           }
           Err(errors) => {
             output_retries = output_retries + 1

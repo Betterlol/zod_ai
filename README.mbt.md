@@ -21,6 +21,12 @@ the runtime deterministic to test with a fixed Mock Model.
 - Tools can be allowed, rejected, or stopped for explicit approval before they
   execute.
 - Tool definitions export their input schema as standard JSON Schema.
+- `tool_with_context` receives per-run JSON dependencies, prompt, transcript,
+  call ID and turn number; use `run_with_deps` to supply dependencies.
+- `ToolSet` composes reusable groups while rejecting duplicate names.
+- Completed runs record model responses and can be replayed deterministically.
+- Local tools export MCP `inputSchema` definitions and MCP client callbacks can
+  be adapted with `mcp_tool`.
 
 ## Run the example
 
@@ -61,6 +67,7 @@ match agent.run(model, "Where is order ord-7?") {
 ```
 
 Use `tool_with_policy(..., @zod_ai.require_approval(), ...)` for a tool that
-must stop at an approval boundary. The MVP returns `ApprovalRequired` with the
-validated call; persistence and later resumption are intentionally left to a
-future adapter layer.
+must stop at an approval boundary. The runtime returns `ApprovalRequired` with
+the validated call and resumable transcript; call
+`agent.resume_after_approval(model, request, true)` after an explicit approval.
+Cross-process persistence of that request remains an adapter concern.

@@ -8,7 +8,13 @@ import {
 // Values
 pub fn agent(Array[ToolContract], @core.Schema, repair_policy? : RepairPolicy) -> Agent
 
+pub fn agent_with_tool_sets(Array[ToolSet], @core.Schema, repair_policy? : RepairPolicy) -> Result[Agent, String]
+
+pub fn combine_tool_sets(Array[ToolSet]) -> Result[ToolSet, String]
+
 pub fn final_output(Json) -> ModelResponse
+
+pub fn mcp_tool(String, String, @core.Schema, @core.Schema, (String, Json) -> Result[Json, String]) -> ToolContract
 
 pub fn mock_model(Array[ModelResponse]) -> (Array[Message], Array[ToolDefinition]) -> Result[ModelResponse, String]
 
@@ -16,13 +22,23 @@ pub fn reject(String) -> ExecutionPolicy
 
 pub fn repair_policy(Int, Int, Int, retry_tool_failures? : Bool) -> RepairPolicy
 
+pub fn replay_model(AgentRunResult) -> (Array[Message], Array[ToolDefinition]) -> Result[ModelResponse, String]
+
 pub fn require_approval() -> ExecutionPolicy
+
+pub fn run_context(Json, String, Array[Message], String, Int) -> RunContext
 
 pub fn tool(String, String, @core.Schema, @core.Schema, (Json) -> Result[Json, String]) -> ToolContract
 
 pub fn tool_call(String, String, Json) -> ToolCall
 
 pub fn tool_response(ToolCall) -> ModelResponse
+
+pub fn tool_set(Array[ToolContract]) -> ToolSet
+
+pub fn tool_with_context(String, String, @core.Schema, @core.Schema, (RunContext, Json) -> Result[Json, String]) -> ToolContract
+
+pub fn tool_with_context_and_policy(String, String, @core.Schema, @core.Schema, ExecutionPolicy, (RunContext, Json) -> Result[Json, String]) -> ToolContract
 
 pub fn tool_with_policy(String, String, @core.Schema, @core.Schema, ExecutionPolicy, (Json) -> Result[Json, String]) -> ToolContract
 
@@ -34,7 +50,10 @@ pub struct Agent {
   output_schema : @core.Schema
   repair_policy : RepairPolicy
 }
+pub fn Agent::mcp_tool_definitions(Self) -> Array[McpToolDefinition]
+pub fn Agent::resume_after_approval(Self, (Array[Message], Array[ToolDefinition]) -> Result[ModelResponse, String], ApprovalRequest, Bool) -> Result[AgentRunResult, AgentFailure]
 pub fn Agent::run(Self, (Array[Message], Array[ToolDefinition]) -> Result[ModelResponse, String], String) -> Result[AgentRunResult, AgentFailure]
+pub fn Agent::run_with_deps(Self, (Array[Message], Array[ToolDefinition]) -> Result[ModelResponse, String], String, Json) -> Result[AgentRunResult, AgentFailure]
 pub fn Agent::tool_definitions(Self) -> Array[ToolDefinition]
 
 pub enum AgentEvent {
@@ -63,11 +82,20 @@ pub struct AgentRunResult {
   output : Json
   messages : Array[Message]
   events : Array[AgentEvent]
+  responses : Array[ModelResponse]
 }
 
 pub struct ApprovalRequest {
   call : ToolCall
   validated_arguments : Json
+  prompt : String
+  deps : Json
+  messages : Array[Message]
+  events : Array[AgentEvent]
+  responses : Array[ModelResponse]
+  turns : Int
+  tool_retries : Int
+  output_retries : Int
 }
 
 pub enum ExecutionPolicy {
@@ -75,6 +103,13 @@ pub enum ExecutionPolicy {
   Reject(String)
   RequireApproval
 }
+
+pub struct McpToolDefinition {
+  name : String
+  description : String
+  input_schema : Json
+}
+pub fn McpToolDefinition::to_json(Self) -> Json
 
 pub enum Message {
   UserPrompt(String)
@@ -102,6 +137,14 @@ pub struct RetryPrompt {
   reason : String
 }
 
+pub struct RunContext {
+  deps : Json
+  prompt : String
+  messages : Array[Message]
+  tool_call_id : String
+  turn : Int
+}
+
 pub struct ToolCall {
   id : String
   name : String
@@ -114,9 +157,10 @@ pub struct ToolContract {
   input_schema : @core.Schema
   output_schema : @core.Schema
   execution_policy : ExecutionPolicy
-  execute : (Json) -> Result[Json, String]
+  execute : (RunContext, Json) -> Result[Json, String]
 }
 pub fn ToolContract::definition(Self) -> ToolDefinition
+pub fn ToolContract::mcp_definition(Self) -> McpToolDefinition
 
 pub struct ToolDefinition {
   name : String
@@ -129,6 +173,11 @@ pub struct ToolResult {
   tool_name : String
   value : Json
 }
+
+pub struct ToolSet {
+  tools : Array[ToolContract]
+}
+pub fn ToolSet::definitions(Self) -> Array[ToolDefinition]
 
 // Type aliases
 pub type Model = (Array[Message], Array[ToolDefinition]) -> Result[ModelResponse, String]
