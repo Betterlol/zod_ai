@@ -23,6 +23,9 @@ jobs:
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
 
+      - name: Update MoonBit registry
+        run: moon update
+
       - name: Check formatting
         run: moon fmt --check
 
